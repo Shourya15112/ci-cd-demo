@@ -1,4 +1,4 @@
-name: Deploy to EC2
+name: Deploy via SSM (no SSH)
 
 on:
   push:
@@ -7,16 +7,28 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Deploy to EC2
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.EC2_PUBLIC_IP }}
-        username: ec2-user
-        key: ${{ secrets.EC2_SSH_KEY }}
-        source: "index.html"
-        target: "/var/www/myapp"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Ask EC2 (via SSM) to pull latest index.html and restart nginx
+        run: |
+          aws ssm send-command \
+            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"set -e\",
+              \"sudo mkdir -p /var/www/myapp\",
+              \"command -v curl || sudo dnf install -y curl\",
+              \"curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/index.html -o /var/www/myapp/index.html\",
+              \"sudo systemctl restart nginx\"
+            ]" \
+            --output text
+
